@@ -24,10 +24,10 @@
     { id: "any", label: "どこでもない", note: "国も経度も問わず、世界中からでたらめに。" }
   ];
   const LEVELS = [
-    { label: "浅層", max: null, text: "制限なし" },
-    { label: "中層", max: 30, text: "今日30人まで" },
-    { label: "深層", max: 5, text: "今日5人まで" },
-    { label: "最深部", max: 0, text: "今日まだ誰も" }
+    { label: "浅層", min: 30, max: null, text: "今日31人以上" },
+    { label: "中層", min: 5, max: 30, text: "今日6〜30人" },
+    { label: "深層", min: 0, max: 5, text: "今日1〜5人" },
+    { label: "最深部", min: null, max: 0, text: "今日まだ誰も" }
   ];
   const playable = (s) => s && s.url_resolved && /^https?:/i.test(s.url_resolved) && !s.hls && !/\.(m3u8?|pls|asx|xspf)(\?|$)/i.test(s.url_resolved)
     && (location.protocol !== "https:" || /^https:/i.test(s.url_resolved));
@@ -242,13 +242,22 @@
         byCountry.set(key, list);
         return list;
       }
+      /* 選んだ深さの帯にいる局から。帯に局がなければ、帯より浅い（よく聴かれている）局のうち
+         帯にいちばん近いものへ。帯より深い局には入らない。ただし糸をたどっているときだけは、
+         浅いほうにも何もなければ、帯のすぐ下の局を選ぶ（糸の先が途切れないように） */
       function chooseFrom(list) {
-        const max = LEVELS[st.depth].max;
+        const lv = LEVELS[st.depth];
         const fresh = list.filter((s) => !st.tried.has(s.stationuuid));
         const pool = fresh.length ? fresh : list;
-        const deep = max == null ? pool : pool.filter((s) => s.clickcount <= max);
-        if (deep.length) return { list: U.shuffle(deep), relaxed: false };
-        return { list: pool.slice().sort((a, b) => a.clickcount - b.clickcount).slice(0, 6), relaxed: true };
+        const inBand = pool.filter((s) => U.inBand(s.clickcount, lv));
+        if (inBand.length) return { list: U.shuffle(inBand), relaxed: null };
+        const above = lv.max == null ? [] : pool.filter((s) => s.clickcount > lv.max).sort((a, b) => a.clickcount - b.clickcount);
+        if (above.length) return { list: above.slice(0, 6), relaxed: "up" };
+        if (st.thread && lv.min != null) {
+          const below = pool.filter((s) => s.clickcount <= lv.min).sort((a, b) => b.clickcount - a.clickcount);
+          if (below.length) return { list: below.slice(0, 6), relaxed: "down" };
+        }
+        return { list: [], relaxed: null, bandEmpty: pool.length > 0 };
       }
       async function candidates() {
         if (st.thread && st.thread.kind === "country") {
@@ -264,11 +273,16 @@
         }
         let near = nearList(st.lon);
         if (!near.length) near = countries.slice().sort((a, b) => lonDiff(a.lon, st.lon) - lonDiff(b.lon, st.lon)).slice(0, 3);
+        /* 経線の上の国を順に見て、選んだ深さの局がある国を先に使う */
+        let fallback = null;
         for (const c of U.shuffle(near).slice(0, 4)) {
           const list = await stationsOf("cc:" + c.code, "/json/stations/search?countrycode=" + c.code + "&hidebroken=true&order=clickcount&reverse=false&limit=500");
-          if (list.length) return chooseFrom(list);
+          if (!list.length) continue;
+          const r = chooseFrom(list);
+          if (r.list.length && !r.relaxed) return r;
+          if (!fallback || (!fallback.list.length && (r.list.length || r.bandEmpty))) fallback = r;
         }
-        return { list: [], relaxed: false };
+        return fallback || { list: [], relaxed: null };
       }
       function tryPlay(s, stale) {
         return new Promise((resolve) => {
@@ -328,7 +342,9 @@
           meta: [["国", country], ["地域", s.state], ["言語", lang], ["形式", [s.codec, s.bitrate ? s.bitrate + "kbps" : ""].filter(Boolean).join(" ")], ["票", s.votes ? U.num(s.votes) + "票" : ""]],
           media,
           image: s.favicon && /^https:/i.test(s.favicon) ? s.favicon : "",
-          extra: relaxed ? U.h("p", { class: "room-note" }, "この辺りの局は、今日すでに誰かが聴いていた。いちばん静かな局を選んだ。") : null,
+          extra: relaxed ? U.h("p", { class: "room-note" }, relaxed === "down"
+            ? "糸の先には" + LEVELS[st.depth].label + "より浅い局がなかったので、すぐ下の層の局を選んだ。"
+            : "この辺りには" + LEVELS[st.depth].label + "の局がなかったので、それより少しよく聴かれている局を選んだ。") : null,
           metric: { value: n, unit: "人", label: "今日この局に合わせた人（Radio Browser 経由）", poem: n === 0 ? "今日この局に合わせたのは、あなたが最初。" : "今日" + (n + 1) + "人目の聴き手。" },
           links, url: s.homepage && /^https?:/i.test(s.homepage) ? s.homepage : "", urlLabel: "局のページへ",
           threads
@@ -355,8 +371,16 @@
           status("探しています……");
           await loadCountries();
           if (stale()) return null;
-          const { list, relaxed } = await candidates();
+          const { list, relaxed, bandEmpty } = await candidates();
           if (stale()) return null;
+          if (!list.length && bandEmpty) {
+            stat.level(0.12);
+            status("この深さの局がない");
+            setTimeout(() => { if (!stale() && stream.paused) stat.level(0, 0.8); }, 2600);
+            return { notice: U.notice(LEVELS[st.depth].label + "の局が見つからなかった",
+              (st.mode === "dial" && !st.thread ? "この経線の上には、" : "ここには、") + LEVELS[st.depth].label + "（" + LEVELS[st.depth].text + "）の局がなかった。" + (st.mode === "dial" && !st.thread ? "ダイヤルを回すか、" : "") + "深度を変えてみて。",
+              [U.btn("もう一度探す", () => dg.run(), "btn-dig"), U.btn("でたらめに回す", () => spinTo(-180 + Math.random() * 360))]) };
+          }
           for (const s of list.slice(0, 5)) {
             st.tried.add(s.stationuuid);
             status("合わせています……" + (s.name || "").trim());

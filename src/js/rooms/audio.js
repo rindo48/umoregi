@@ -154,8 +154,8 @@
     { id: "folk", label: "音の図書館", note: "誰でも音を預けられる棚。玉石混交。", q: "collection:folksoundomy", levels: [1000, 100, 20, 3] },
     { id: "jp", label: "日本語の音", note: "日本語で語られ、歌われた録音。", q: "mediatype:audio AND language:(jpn OR japanese OR Japanese)", levels: [1000, 100, 30, 5] }
   ];
-  const DEPTH_NAMES = ["浅層", "中層", "深層", "最深部"];
-  const levelsOf = (vein) => vein.levels.map((max, i) => ({ label: DEPTH_NAMES[i], max }));
+  const DEPTH_NAMES = U.DEPTH_NAMES;
+  const levelsOf = (vein) => U.depthBands(vein.levels);
 
   const AUDIO_FORMATS = ["VBR MP3", "128Kbps MP3", "MP3", "64Kbps MP3", "Ogg Vorbis", "Opus", "Flac", "24bit Flac", "WAVE"];
   function pickTracks(files, vein) {
@@ -257,9 +257,8 @@
         dig: async (arg, stale) => {
           const vein = veinOf();
           const base = st.thread ? "mediatype:audio AND " + st.thread.q : vein.q;
-          for (let di = st.depth; di >= -1; di--) {
-            const max = di >= 0 ? vein.levels[di] : null;
-            const q = base + (max != null ? " AND downloads:[0 TO " + max + "]" : "") + " AND NOT title:(iptv OR m3u OR tiktok)";
+          for (const step of U.depthSteps(levelsOf(vein), st.depth, !!st.thread)) {
+            const q = base + U.bandQuery("downloads", step.band) + " AND NOT title:(iptv OR m3u OR tiktok)";
             for (let attempt = 0; attempt < 2; attempt++) {
               const { n, docs } = await iaRandomDocs(q, st.thread ? "" : vein.prefix);
               if (stale()) return null;
@@ -269,9 +268,7 @@
                 const find = await buildFind(doc, vein, st);
                 if (stale()) return null;
                 if (find) {
-                  if (di !== st.depth) find.extra = U.h("p", { class: "room-note" }, di >= 0
-                    ? DEPTH_NAMES[st.depth] + "には何も埋まっていなかったので、" + DEPTH_NAMES[di] + "から掘り出した。"
-                    : "どの深さにも見つからなかったので、深さを問わずに掘り出した。");
+                  if (step.note) find.extra = U.h("p", { class: "room-note" }, step.note);
                   return find;
                 }
               }

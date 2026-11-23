@@ -364,7 +364,32 @@
     return wrap;
   };
 
-  /* ---------- 部品：深度 ---------- */
+  /* ---------- 部品：深度 ----------
+     深度は上限ではなく「帯」。浅層なら中層の上限より上だけを掘り、それより深い層には入らない。
+     帯は { min, max } で、min より多く max 以下（どちらも null なら、その側に限りなし）。 */
+  U.DEPTH_NAMES = ["浅層", "中層", "深層", "最深部"];
+  U.depthBands = (maxes) => maxes.map((max, i) => ({ label: U.DEPTH_NAMES[i], max, min: i + 1 < maxes.length ? maxes[i + 1] : null }));
+  U.inBand = (n, b) => (b.min == null || n > b.min) && (b.max == null || n <= b.max);
+  U.bandText = (b, unit) => {
+    const u = unit || "";
+    if (b.max == null) return b.min == null ? "制限なし" : U.num(b.min + 1) + u + "以上";
+    if (b.min == null) return b.max === 0 ? "0" + u : U.num(b.max) + u + "以下";
+    if (b.min + 1 === b.max) return U.num(b.max) + u;
+    return U.num(b.min + 1) + "〜" + U.num(b.max) + u;
+  };
+  /* 選んだ帯 → それより浅い帯 → 浅層より上、の順に掘る。深いほうへは下りない。
+     糸をたどっているときだけは、最後に深さを問わずに掘る（糸の先が途切れないように） */
+  U.depthSteps = (levels, i, loose) => {
+    const steps = [];
+    for (let d = i; d >= 0; d--) steps.push({ band: levels[d], note: d === i ? "" : levels[i].label + "には何も埋まっていなかったので、" + levels[d].label + "から掘り出した。" });
+    if (levels[0].max != null) steps.push({ band: { min: levels[0].max, max: null }, note: (i === 0 ? "浅層には" : levels[i].label + "から浅層までには") + "何も埋まっていなかったので、浅層より上から掘り出した。" });
+    if (loose) steps.push({ band: { min: null, max: null }, note: "糸の先には" + levels[i].label + "より浅いものがなかったので、深さを問わずに掘り出した。" });
+    return steps;
+  };
+  /* Internet Archive の検索に足す、ダウンロード数の帯 */
+  U.bandQuery = (field, b) => (b.min == null && b.max == null) ? ""
+    : " AND " + field + ":[" + (b.min == null ? 0 : b.min + 1) + " TO " + (b.max == null ? 1000000000 : b.max) + "]";
+
   U.depth = function ({ levels, value, onChange, unit, label }) {
     const wrap = U.h("div", { class: "control" });
     const track = U.h("div", { class: "depth", role: "radiogroup", "aria-label": label || "深度" });
@@ -375,7 +400,7 @@
         type: "button", class: "depth-stop", role: "radio", style: { "--i": i },
         "aria-checked": String(i === value),
         on: { click: () => { if (i === value) return; set(i); onChange(i); } }
-      }, U.h("span", { class: "depth-name" }, lv.label), U.h("span", { class: "depth-max" }, lv.text || (lv.max == null ? "制限なし" : (lv.prefix || "") + U.num(lv.max) + (unit || "") + "以下"))));
+      }, U.h("span", { class: "depth-name" }, lv.label), U.h("span", { class: "depth-max" }, lv.text || U.bandText(lv, unit))));
       track.append(...buttons);
     }
     function set(i) { value = i; buttons.forEach((b, j) => b.setAttribute("aria-checked", String(j === i))); }

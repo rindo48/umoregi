@@ -63,9 +63,7 @@
     { id: "topic", label: "主題から", note: "趣味、工芸、郷土料理……分類の奥へ潜って、読まれていない頁を探す。" },
     { id: "near", label: "近くの場所", note: "ある地点から10km以内の、誰も気に留めない場所の頁。" }
   ];
-  const LEVELS = [
-    { label: "浅層", max: 3000 }, { label: "中層", max: 300 }, { label: "深層", max: 30 }, { label: "最深部", max: 3 }
-  ];
+  const LEVELS = U.depthBands([3000, 300, 30, 3]);
 
   let dg = null;
   const def = {
@@ -165,14 +163,24 @@
         };
       }
 
-      /* いちばん読まれていない順に並べる。深さに届くものがあればそれだけ、なければ全部 */
-      function loneliest(pv, max) {
+      /* 選んだ深さの帯に入る頁を、読まれていない順に並べる。帯になければ、帯より浅い（よく読まれている）
+         頁のうち帯に近いものから。帯より深い頁には入らない。糸をたどっているときだけは、
+         浅いほうにもなければ帯のすぐ下の頁へ（糸の先が途切れないように） */
+      function loneliest(pv, lv, loose) {
         const scored = Array.from(pv.entries()).map(([t, days]) => ({ t, days, n: total(days) }));
         if (!scored.length) return null;
         scored.sort((a, b) => a.n - b.n || Math.random() - 0.5);
-        const under = scored.filter((x) => x.n <= max);
-        const list = under.length ? U.shuffle(under.slice(0, 3)).concat(under.slice(3)) : scored;
-        return { list, pick: list[0], relaxed: !under.length };
+        const inBand = scored.filter((x) => U.inBand(x.n, lv));
+        if (inBand.length) { const list = U.shuffle(inBand.slice(0, 3)).concat(inBand.slice(3)); return { list, pick: list[0], relaxed: false }; }
+        const above = lv.max == null ? [] : scored.filter((x) => x.n > lv.max);
+        if (above.length) return { list: above, pick: above[0], relaxed: true };
+        if (loose && lv.min != null) { const below = scored.filter((x) => x.n <= lv.min).reverse(); if (below.length) return { list: below, pick: below[0], relaxed: true }; }
+        return null;
+      }
+      /* 拾った頁がどれも選んだ帯より深かったとき（帯より深いところへは下りない） */
+      function tooDeep(what) {
+        const lv = LEVELS[st.depth];
+        return { notice: U.notice(lv.label + "の頁が見つからなかった", what + "は、どれも" + lv.label + "（" + U.bandText(lv, "回") + "）より読まれていなかった。もう一度めくるか、深度を変えてみて。", [U.btn("もう一度", () => dg.run(), "btn-dig")]) };
       }
       /* 曖昧さ回避や一覧の頁を飛ばしながら、最初に形になった一頁を返す */
       async function firstGood(lang, r, note, stale) {
@@ -194,7 +202,7 @@
           return card;
         },
         dig: async (arg, stale) => {
-          const max = LEVELS[st.depth].max;
+          const lv = LEVELS[st.depth];
           if (st.thread && st.thread.kind === "link") {
             const d = await api(st.thread.lang, { action: "query", prop: "links", titles: st.thread.title, plnamespace: 0, pllimit: 500 });
             const links = (((d.query && d.query.pages) || [])[0] || {}).links || [];
@@ -202,7 +210,7 @@
             const sample = U.shuffle(links.map((l) => l.title)).slice(0, 20);
             const pv = await pageviews(st.thread.lang, sample);
             if (stale()) return null;
-            const r = loneliest(pv, max);
+            const r = loneliest(pv, lv, !!st.thread);
             const f = r && await firstGood(st.thread.lang, r, "「" + st.thread.title + "」の中のリンクを一本たどって来た。", stale);
             if (!f) return stale() ? null : { notice: U.notice("リンクの先に、読める頁がなかった", "糸を切って、別の頁から。", [U.btn("糸を切る", () => { st.thread = null; threadCtl.set(null); dg.run(); }, "btn-dig")]) };
             st.thread = { kind: "link", lang: st.thread.lang, title: f.title, label: "リンク", value: f.title };
@@ -217,7 +225,7 @@
             const pool = await categoryPool(st.thread.lang, cat, 0);
             const pv = await pageviews(st.thread.lang, U.shuffle(pool.filter((t) => t !== st.thread.title)).slice(0, 30));
             if (stale()) return null;
-            const r = loneliest(pv, max);
+            const r = loneliest(pv, lv, !!st.thread);
             const f = r && await firstGood(st.thread.lang, r, "分類「" + cat.replace(/^Category:|^カテゴリ:/, "") + "」から。", stale);
             if (!f) return stale() ? null : { notice: U.notice("この分類には、ほかの頁がなかった", "", [U.btn("糸を切る", () => { st.thread = null; threadCtl.set(null); dg.run(); }, "btn-dig")]) };
             return f;
@@ -229,8 +237,9 @@
             if (!titles.length) return { notice: U.notice("近くに頁のある場所がなかった", "地名を変えて、もう一度。") };
             const pv = await pageviews("ja", U.shuffle(titles).slice(0, 60));
             if (stale()) return null;
-            const r = loneliest(pv, max);
-            const f = r && await firstGood("ja", r, r.relaxed ? "この辺りの頁は、どれも誰かに読まれていた。いちばん静かな頁を選んだ。" : "", stale);
+            const r = loneliest(pv, lv, !!st.thread);
+            if (!r && pv.size) return tooDeep("この辺りの頁");
+            const f = r && await firstGood("ja", r, r.relaxed ? "この辺りには" + lv.label + "の頁がなかったので、それより少しよく読まれている頁を選んだ。" : "", stale);
             if (!f) return stale() ? null : { notice: U.notice("閲覧数が確かめられなかった", "少し待ってから、もう一度。", [U.btn("もう一度", () => dg.run(), "btn-dig")]) };
             return f;
           }
@@ -240,20 +249,22 @@
             if (stale()) return null;
             const pv = await pageviews("ja", U.shuffle(pool).slice(0, 40));
             if (stale()) return null;
-            const r = loneliest(pv, max);
-            const f = r && await firstGood("ja", r, "分類「" + cat.replace("Category:", "") + "」の奥から。" + (r.relaxed ? "この深さの頁はなかったので、いちばん静かな頁を選んだ。" : ""), stale);
+            const r = loneliest(pv, lv, !!st.thread);
+            if (!r && pv.size) return tooDeep("この分類から拾った頁");
+            const f = r && await firstGood("ja", r, "分類「" + cat.replace("Category:", "") + "」の奥から。" + (r.relaxed ? lv.label + "の頁はなかったので、それより少しよく読まれている頁を選んだ。" : ""), stale);
             if (!f) return stale() ? null : { notice: U.notice("この分類には頁が見つからなかった", "もう一度掘ってみて。", [U.btn("もう一度", () => dg.run(), "btn-dig")]) };
             return f;
           }
           const lang = st.vein === "en" ? "en" : "ja";
-          let best = null;
+          let best = null, seen = 0;
           for (let round = 0; round < 3; round++) {
             /* 曖昧さ回避の頁は最初から除いておく */
             const d = await api(lang, { action: "query", generator: "random", grnnamespace: 0, grnlimit: 20, prop: "pageprops", ppprop: "disambiguation" });
             const titles = ((d.query && d.query.pages) || []).filter((p) => !(p.pageprops && "disambiguation" in p.pageprops)).map((p) => p.title);
             const pv = await pageviews(lang, titles);
             if (stale()) return null;
-            const r = loneliest(pv, max);
+            seen += pv.size;
+            const r = loneliest(pv, lv, !!st.thread);
             if (r && !r.relaxed) {
               const f = await firstGood(lang, r, "", stale);
               if (stale()) return null;
@@ -261,7 +272,8 @@
             }
             if (r && (!best || r.pick.n < best.list[0].n)) best = r;
           }
-          const f = best && await firstGood(lang, best, "この深さの頁は見つからなかったので、拾った中でいちばん静かな頁を選んだ。", stale);
+          if (!best && seen) return tooDeep("でたらめに拾った頁");
+          const f = best && await firstGood(lang, best, best.relaxed ? lv.label + "の頁は見つからなかったので、拾った中でそれにいちばん近い、少しよく読まれている頁を選んだ。" : "", stale);
           return f || (stale() ? null : { notice: U.notice("読める頁が見つからなかった", "もう一度めくってみて。", [U.btn("もう一度", () => dg.run(), "btn-dig")]) });
         }
       });

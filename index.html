@@ -1289,7 +1289,32 @@ window.UMO_DATA = {
     return wrap;
   };
 
-  /* ---------- 部品：深度 ---------- */
+  /* ---------- 部品：深度 ----------
+     深度は上限ではなく「帯」。浅層なら中層の上限より上だけを掘り、それより深い層には入らない。
+     帯は { min, max } で、min より多く max 以下（どちらも null なら、その側に限りなし）。 */
+  U.DEPTH_NAMES = ["浅層", "中層", "深層", "最深部"];
+  U.depthBands = (maxes) => maxes.map((max, i) => ({ label: U.DEPTH_NAMES[i], max, min: i + 1 < maxes.length ? maxes[i + 1] : null }));
+  U.inBand = (n, b) => (b.min == null || n > b.min) && (b.max == null || n <= b.max);
+  U.bandText = (b, unit) => {
+    const u = unit || "";
+    if (b.max == null) return b.min == null ? "制限なし" : U.num(b.min + 1) + u + "以上";
+    if (b.min == null) return b.max === 0 ? "0" + u : U.num(b.max) + u + "以下";
+    if (b.min + 1 === b.max) return U.num(b.max) + u;
+    return U.num(b.min + 1) + "〜" + U.num(b.max) + u;
+  };
+  /* 選んだ帯 → それより浅い帯 → 浅層より上、の順に掘る。深いほうへは下りない。
+     糸をたどっているときだけは、最後に深さを問わずに掘る（糸の先が途切れないように） */
+  U.depthSteps = (levels, i, loose) => {
+    const steps = [];
+    for (let d = i; d >= 0; d--) steps.push({ band: levels[d], note: d === i ? "" : levels[i].label + "には何も埋まっていなかったので、" + levels[d].label + "から掘り出した。" });
+    if (levels[0].max != null) steps.push({ band: { min: levels[0].max, max: null }, note: (i === 0 ? "浅層には" : levels[i].label + "から浅層までには") + "何も埋まっていなかったので、浅層より上から掘り出した。" });
+    if (loose) steps.push({ band: { min: null, max: null }, note: "糸の先には" + levels[i].label + "より浅いものがなかったので、深さを問わずに掘り出した。" });
+    return steps;
+  };
+  /* Internet Archive の検索に足す、ダウンロード数の帯 */
+  U.bandQuery = (field, b) => (b.min == null && b.max == null) ? ""
+    : " AND " + field + ":[" + (b.min == null ? 0 : b.min + 1) + " TO " + (b.max == null ? 1000000000 : b.max) + "]";
+
   U.depth = function ({ levels, value, onChange, unit, label }) {
     const wrap = U.h("div", { class: "control" });
     const track = U.h("div", { class: "depth", role: "radiogroup", "aria-label": label || "深度" });
@@ -1300,7 +1325,7 @@ window.UMO_DATA = {
         type: "button", class: "depth-stop", role: "radio", style: { "--i": i },
         "aria-checked": String(i === value),
         on: { click: () => { if (i === value) return; set(i); onChange(i); } }
-      }, U.h("span", { class: "depth-name" }, lv.label), U.h("span", { class: "depth-max" }, lv.text || (lv.max == null ? "制限なし" : (lv.prefix || "") + U.num(lv.max) + (unit || "") + "以下"))));
+      }, U.h("span", { class: "depth-name" }, lv.label), U.h("span", { class: "depth-max" }, lv.text || U.bandText(lv, unit))));
       track.append(...buttons);
     }
     function set(i) { value = i; buttons.forEach((b, j) => b.setAttribute("aria-checked", String(j === i))); }
@@ -1745,8 +1770,8 @@ window.UMO_DATA = {
     { id: "folk", label: "音の図書館", note: "誰でも音を預けられる棚。玉石混交。", q: "collection:folksoundomy", levels: [1000, 100, 20, 3] },
     { id: "jp", label: "日本語の音", note: "日本語で語られ、歌われた録音。", q: "mediatype:audio AND language:(jpn OR japanese OR Japanese)", levels: [1000, 100, 30, 5] }
   ];
-  const DEPTH_NAMES = ["浅層", "中層", "深層", "最深部"];
-  const levelsOf = (vein) => vein.levels.map((max, i) => ({ label: DEPTH_NAMES[i], max }));
+  const DEPTH_NAMES = U.DEPTH_NAMES;
+  const levelsOf = (vein) => U.depthBands(vein.levels);
 
   const AUDIO_FORMATS = ["VBR MP3", "128Kbps MP3", "MP3", "64Kbps MP3", "Ogg Vorbis", "Opus", "Flac", "24bit Flac", "WAVE"];
   function pickTracks(files, vein) {
@@ -1848,9 +1873,8 @@ window.UMO_DATA = {
         dig: async (arg, stale) => {
           const vein = veinOf();
           const base = st.thread ? "mediatype:audio AND " + st.thread.q : vein.q;
-          for (let di = st.depth; di >= -1; di--) {
-            const max = di >= 0 ? vein.levels[di] : null;
-            const q = base + (max != null ? " AND downloads:[0 TO " + max + "]" : "") + " AND NOT title:(iptv OR m3u OR tiktok)";
+          for (const step of U.depthSteps(levelsOf(vein), st.depth, !!st.thread)) {
+            const q = base + U.bandQuery("downloads", step.band) + " AND NOT title:(iptv OR m3u OR tiktok)";
             for (let attempt = 0; attempt < 2; attempt++) {
               const { n, docs } = await iaRandomDocs(q, st.thread ? "" : vein.prefix);
               if (stale()) return null;
@@ -1860,9 +1884,7 @@ window.UMO_DATA = {
                 const find = await buildFind(doc, vein, st);
                 if (stale()) return null;
                 if (find) {
-                  if (di !== st.depth) find.extra = U.h("p", { class: "room-note" }, di >= 0
-                    ? DEPTH_NAMES[st.depth] + "には何も埋まっていなかったので、" + DEPTH_NAMES[di] + "から掘り出した。"
-                    : "どの深さにも見つからなかったので、深さを問わずに掘り出した。");
+                  if (step.note) find.extra = U.h("p", { class: "room-note" }, step.note);
                   return find;
                 }
               }
@@ -1907,10 +1929,10 @@ window.UMO_DATA = {
     { id: "any", label: "どこでもない", note: "国も経度も問わず、世界中からでたらめに。" }
   ];
   const LEVELS = [
-    { label: "浅層", max: null, text: "制限なし" },
-    { label: "中層", max: 30, text: "今日30人まで" },
-    { label: "深層", max: 5, text: "今日5人まで" },
-    { label: "最深部", max: 0, text: "今日まだ誰も" }
+    { label: "浅層", min: 30, max: null, text: "今日31人以上" },
+    { label: "中層", min: 5, max: 30, text: "今日6〜30人" },
+    { label: "深層", min: 0, max: 5, text: "今日1〜5人" },
+    { label: "最深部", min: null, max: 0, text: "今日まだ誰も" }
   ];
   const playable = (s) => s && s.url_resolved && /^https?:/i.test(s.url_resolved) && !s.hls && !/\.(m3u8?|pls|asx|xspf)(\?|$)/i.test(s.url_resolved)
     && (location.protocol !== "https:" || /^https:/i.test(s.url_resolved));
@@ -2125,13 +2147,22 @@ window.UMO_DATA = {
         byCountry.set(key, list);
         return list;
       }
+      /* 選んだ深さの帯にいる局から。帯に局がなければ、帯より浅い（よく聴かれている）局のうち
+         帯にいちばん近いものへ。帯より深い局には入らない。ただし糸をたどっているときだけは、
+         浅いほうにも何もなければ、帯のすぐ下の局を選ぶ（糸の先が途切れないように） */
       function chooseFrom(list) {
-        const max = LEVELS[st.depth].max;
+        const lv = LEVELS[st.depth];
         const fresh = list.filter((s) => !st.tried.has(s.stationuuid));
         const pool = fresh.length ? fresh : list;
-        const deep = max == null ? pool : pool.filter((s) => s.clickcount <= max);
-        if (deep.length) return { list: U.shuffle(deep), relaxed: false };
-        return { list: pool.slice().sort((a, b) => a.clickcount - b.clickcount).slice(0, 6), relaxed: true };
+        const inBand = pool.filter((s) => U.inBand(s.clickcount, lv));
+        if (inBand.length) return { list: U.shuffle(inBand), relaxed: null };
+        const above = lv.max == null ? [] : pool.filter((s) => s.clickcount > lv.max).sort((a, b) => a.clickcount - b.clickcount);
+        if (above.length) return { list: above.slice(0, 6), relaxed: "up" };
+        if (st.thread && lv.min != null) {
+          const below = pool.filter((s) => s.clickcount <= lv.min).sort((a, b) => b.clickcount - a.clickcount);
+          if (below.length) return { list: below.slice(0, 6), relaxed: "down" };
+        }
+        return { list: [], relaxed: null, bandEmpty: pool.length > 0 };
       }
       async function candidates() {
         if (st.thread && st.thread.kind === "country") {
@@ -2147,11 +2178,16 @@ window.UMO_DATA = {
         }
         let near = nearList(st.lon);
         if (!near.length) near = countries.slice().sort((a, b) => lonDiff(a.lon, st.lon) - lonDiff(b.lon, st.lon)).slice(0, 3);
+        /* 経線の上の国を順に見て、選んだ深さの局がある国を先に使う */
+        let fallback = null;
         for (const c of U.shuffle(near).slice(0, 4)) {
           const list = await stationsOf("cc:" + c.code, "/json/stations/search?countrycode=" + c.code + "&hidebroken=true&order=clickcount&reverse=false&limit=500");
-          if (list.length) return chooseFrom(list);
+          if (!list.length) continue;
+          const r = chooseFrom(list);
+          if (r.list.length && !r.relaxed) return r;
+          if (!fallback || (!fallback.list.length && (r.list.length || r.bandEmpty))) fallback = r;
         }
-        return { list: [], relaxed: false };
+        return fallback || { list: [], relaxed: null };
       }
       function tryPlay(s, stale) {
         return new Promise((resolve) => {
@@ -2211,7 +2247,9 @@ window.UMO_DATA = {
           meta: [["国", country], ["地域", s.state], ["言語", lang], ["形式", [s.codec, s.bitrate ? s.bitrate + "kbps" : ""].filter(Boolean).join(" ")], ["票", s.votes ? U.num(s.votes) + "票" : ""]],
           media,
           image: s.favicon && /^https:/i.test(s.favicon) ? s.favicon : "",
-          extra: relaxed ? U.h("p", { class: "room-note" }, "この辺りの局は、今日すでに誰かが聴いていた。いちばん静かな局を選んだ。") : null,
+          extra: relaxed ? U.h("p", { class: "room-note" }, relaxed === "down"
+            ? "糸の先には" + LEVELS[st.depth].label + "より浅い局がなかったので、すぐ下の層の局を選んだ。"
+            : "この辺りには" + LEVELS[st.depth].label + "の局がなかったので、それより少しよく聴かれている局を選んだ。") : null,
           metric: { value: n, unit: "人", label: "今日この局に合わせた人（Radio Browser 経由）", poem: n === 0 ? "今日この局に合わせたのは、あなたが最初。" : "今日" + (n + 1) + "人目の聴き手。" },
           links, url: s.homepage && /^https?:/i.test(s.homepage) ? s.homepage : "", urlLabel: "局のページへ",
           threads
@@ -2238,8 +2276,16 @@ window.UMO_DATA = {
           status("探しています……");
           await loadCountries();
           if (stale()) return null;
-          const { list, relaxed } = await candidates();
+          const { list, relaxed, bandEmpty } = await candidates();
           if (stale()) return null;
+          if (!list.length && bandEmpty) {
+            stat.level(0.12);
+            status("この深さの局がない");
+            setTimeout(() => { if (!stale() && stream.paused) stat.level(0, 0.8); }, 2600);
+            return { notice: U.notice(LEVELS[st.depth].label + "の局が見つからなかった",
+              (st.mode === "dial" && !st.thread ? "この経線の上には、" : "ここには、") + LEVELS[st.depth].label + "（" + LEVELS[st.depth].text + "）の局がなかった。" + (st.mode === "dial" && !st.thread ? "ダイヤルを回すか、" : "") + "深度を変えてみて。",
+              [U.btn("もう一度探す", () => dg.run(), "btn-dig"), U.btn("でたらめに回す", () => spinTo(-180 + Math.random() * 360))]) };
+          }
           for (const s of list.slice(0, 5)) {
             st.tried.add(s.stationuuid);
             status("合わせています……" + (s.name || "").trim());
@@ -2520,8 +2566,8 @@ window.UMO_DATA = {
     { id: "eph", label: "記録映画", note: "教育映画や企業のPR映画。プリンガー・アーカイブより。", q: "collection:prelinger", levels: [5000, 1000, 300, 100] },
     { id: "community", label: "誰かの動画", note: "誰でも動画を預けられる棚。何が出るかわからない。", q: "collection:opensource_movies", levels: [1000, 50, 5, 0] }
   ];
-  const DEPTH_NAMES = ["浅層", "中層", "深層", "最深部"];
-  const levelsOf = (v) => v.levels.map((max, i) => ({ label: DEPTH_NAMES[i], max }));
+  const DEPTH_NAMES = U.DEPTH_NAMES;
+  const levelsOf = (v) => U.depthBands(v.levels);
   const VIDEO_FORMATS = ["h.264", "MPEG4", "512Kb MPEG4", "h.264 IA", "H.264", "Ogg Video", "WebM"];
 
   function pickVideo(files) {
@@ -2630,9 +2676,8 @@ window.UMO_DATA = {
         dig: async (arg, stale) => {
           const vein = veinOf();
           const base = st.thread ? "mediatype:movies AND " + st.thread.q : vein.q;
-          for (let di = st.depth; di >= -1; di--) {
-            const max = di >= 0 ? vein.levels[di] : null;
-            const q = base + (max != null ? " AND downloads:[0 TO " + max + "]" : "") + " AND NOT title:(iptv OR m3u)";
+          for (const step of U.depthSteps(levelsOf(vein), st.depth, !!st.thread)) {
+            const q = base + U.bandQuery("downloads", step.band) + " AND NOT title:(iptv OR m3u)";
             for (let attempt = 0; attempt < 2; attempt++) {
               const { n, docs } = await U.ia.randomDocs(q, "");
               if (stale()) return null;
@@ -2642,7 +2687,7 @@ window.UMO_DATA = {
                 const find = await buildFind(doc, vein);
                 if (stale()) return null;
                 if (find) {
-                  if (di !== st.depth) find.extra = U.h("p", { class: "room-note" }, di >= 0 ? DEPTH_NAMES[st.depth] + "には何も埋まっていなかったので、" + DEPTH_NAMES[di] + "から掘り出した。" : "どの深さにも見つからなかったので、深さを問わずに掘り出した。");
+                  if (step.note) find.extra = U.h("p", { class: "room-note" }, step.note);
                   return find;
                 }
               }
@@ -2948,9 +2993,7 @@ window.UMO_DATA = {
     { id: "topic", label: "主題から", note: "趣味、工芸、郷土料理……分類の奥へ潜って、読まれていない頁を探す。" },
     { id: "near", label: "近くの場所", note: "ある地点から10km以内の、誰も気に留めない場所の頁。" }
   ];
-  const LEVELS = [
-    { label: "浅層", max: 3000 }, { label: "中層", max: 300 }, { label: "深層", max: 30 }, { label: "最深部", max: 3 }
-  ];
+  const LEVELS = U.depthBands([3000, 300, 30, 3]);
 
   let dg = null;
   const def = {
@@ -3050,14 +3093,24 @@ window.UMO_DATA = {
         };
       }
 
-      /* いちばん読まれていない順に並べる。深さに届くものがあればそれだけ、なければ全部 */
-      function loneliest(pv, max) {
+      /* 選んだ深さの帯に入る頁を、読まれていない順に並べる。帯になければ、帯より浅い（よく読まれている）
+         頁のうち帯に近いものから。帯より深い頁には入らない。糸をたどっているときだけは、
+         浅いほうにもなければ帯のすぐ下の頁へ（糸の先が途切れないように） */
+      function loneliest(pv, lv, loose) {
         const scored = Array.from(pv.entries()).map(([t, days]) => ({ t, days, n: total(days) }));
         if (!scored.length) return null;
         scored.sort((a, b) => a.n - b.n || Math.random() - 0.5);
-        const under = scored.filter((x) => x.n <= max);
-        const list = under.length ? U.shuffle(under.slice(0, 3)).concat(under.slice(3)) : scored;
-        return { list, pick: list[0], relaxed: !under.length };
+        const inBand = scored.filter((x) => U.inBand(x.n, lv));
+        if (inBand.length) { const list = U.shuffle(inBand.slice(0, 3)).concat(inBand.slice(3)); return { list, pick: list[0], relaxed: false }; }
+        const above = lv.max == null ? [] : scored.filter((x) => x.n > lv.max);
+        if (above.length) return { list: above, pick: above[0], relaxed: true };
+        if (loose && lv.min != null) { const below = scored.filter((x) => x.n <= lv.min).reverse(); if (below.length) return { list: below, pick: below[0], relaxed: true }; }
+        return null;
+      }
+      /* 拾った頁がどれも選んだ帯より深かったとき（帯より深いところへは下りない） */
+      function tooDeep(what) {
+        const lv = LEVELS[st.depth];
+        return { notice: U.notice(lv.label + "の頁が見つからなかった", what + "は、どれも" + lv.label + "（" + U.bandText(lv, "回") + "）より読まれていなかった。もう一度めくるか、深度を変えてみて。", [U.btn("もう一度", () => dg.run(), "btn-dig")]) };
       }
       /* 曖昧さ回避や一覧の頁を飛ばしながら、最初に形になった一頁を返す */
       async function firstGood(lang, r, note, stale) {
@@ -3079,7 +3132,7 @@ window.UMO_DATA = {
           return card;
         },
         dig: async (arg, stale) => {
-          const max = LEVELS[st.depth].max;
+          const lv = LEVELS[st.depth];
           if (st.thread && st.thread.kind === "link") {
             const d = await api(st.thread.lang, { action: "query", prop: "links", titles: st.thread.title, plnamespace: 0, pllimit: 500 });
             const links = (((d.query && d.query.pages) || [])[0] || {}).links || [];
@@ -3087,7 +3140,7 @@ window.UMO_DATA = {
             const sample = U.shuffle(links.map((l) => l.title)).slice(0, 20);
             const pv = await pageviews(st.thread.lang, sample);
             if (stale()) return null;
-            const r = loneliest(pv, max);
+            const r = loneliest(pv, lv, !!st.thread);
             const f = r && await firstGood(st.thread.lang, r, "「" + st.thread.title + "」の中のリンクを一本たどって来た。", stale);
             if (!f) return stale() ? null : { notice: U.notice("リンクの先に、読める頁がなかった", "糸を切って、別の頁から。", [U.btn("糸を切る", () => { st.thread = null; threadCtl.set(null); dg.run(); }, "btn-dig")]) };
             st.thread = { kind: "link", lang: st.thread.lang, title: f.title, label: "リンク", value: f.title };
@@ -3102,7 +3155,7 @@ window.UMO_DATA = {
             const pool = await categoryPool(st.thread.lang, cat, 0);
             const pv = await pageviews(st.thread.lang, U.shuffle(pool.filter((t) => t !== st.thread.title)).slice(0, 30));
             if (stale()) return null;
-            const r = loneliest(pv, max);
+            const r = loneliest(pv, lv, !!st.thread);
             const f = r && await firstGood(st.thread.lang, r, "分類「" + cat.replace(/^Category:|^カテゴリ:/, "") + "」から。", stale);
             if (!f) return stale() ? null : { notice: U.notice("この分類には、ほかの頁がなかった", "", [U.btn("糸を切る", () => { st.thread = null; threadCtl.set(null); dg.run(); }, "btn-dig")]) };
             return f;
@@ -3114,8 +3167,9 @@ window.UMO_DATA = {
             if (!titles.length) return { notice: U.notice("近くに頁のある場所がなかった", "地名を変えて、もう一度。") };
             const pv = await pageviews("ja", U.shuffle(titles).slice(0, 60));
             if (stale()) return null;
-            const r = loneliest(pv, max);
-            const f = r && await firstGood("ja", r, r.relaxed ? "この辺りの頁は、どれも誰かに読まれていた。いちばん静かな頁を選んだ。" : "", stale);
+            const r = loneliest(pv, lv, !!st.thread);
+            if (!r && pv.size) return tooDeep("この辺りの頁");
+            const f = r && await firstGood("ja", r, r.relaxed ? "この辺りには" + lv.label + "の頁がなかったので、それより少しよく読まれている頁を選んだ。" : "", stale);
             if (!f) return stale() ? null : { notice: U.notice("閲覧数が確かめられなかった", "少し待ってから、もう一度。", [U.btn("もう一度", () => dg.run(), "btn-dig")]) };
             return f;
           }
@@ -3125,20 +3179,22 @@ window.UMO_DATA = {
             if (stale()) return null;
             const pv = await pageviews("ja", U.shuffle(pool).slice(0, 40));
             if (stale()) return null;
-            const r = loneliest(pv, max);
-            const f = r && await firstGood("ja", r, "分類「" + cat.replace("Category:", "") + "」の奥から。" + (r.relaxed ? "この深さの頁はなかったので、いちばん静かな頁を選んだ。" : ""), stale);
+            const r = loneliest(pv, lv, !!st.thread);
+            if (!r && pv.size) return tooDeep("この分類から拾った頁");
+            const f = r && await firstGood("ja", r, "分類「" + cat.replace("Category:", "") + "」の奥から。" + (r.relaxed ? lv.label + "の頁はなかったので、それより少しよく読まれている頁を選んだ。" : ""), stale);
             if (!f) return stale() ? null : { notice: U.notice("この分類には頁が見つからなかった", "もう一度掘ってみて。", [U.btn("もう一度", () => dg.run(), "btn-dig")]) };
             return f;
           }
           const lang = st.vein === "en" ? "en" : "ja";
-          let best = null;
+          let best = null, seen = 0;
           for (let round = 0; round < 3; round++) {
             /* 曖昧さ回避の頁は最初から除いておく */
             const d = await api(lang, { action: "query", generator: "random", grnnamespace: 0, grnlimit: 20, prop: "pageprops", ppprop: "disambiguation" });
             const titles = ((d.query && d.query.pages) || []).filter((p) => !(p.pageprops && "disambiguation" in p.pageprops)).map((p) => p.title);
             const pv = await pageviews(lang, titles);
             if (stale()) return null;
-            const r = loneliest(pv, max);
+            seen += pv.size;
+            const r = loneliest(pv, lv, !!st.thread);
             if (r && !r.relaxed) {
               const f = await firstGood(lang, r, "", stale);
               if (stale()) return null;
@@ -3146,7 +3202,8 @@ window.UMO_DATA = {
             }
             if (r && (!best || r.pick.n < best.list[0].n)) best = r;
           }
-          const f = best && await firstGood(lang, best, "この深さの頁は見つからなかったので、拾った中でいちばん静かな頁を選んだ。", stale);
+          if (!best && seen) return tooDeep("でたらめに拾った頁");
+          const f = best && await firstGood(lang, best, best.relaxed ? lv.label + "の頁は見つからなかったので、拾った中でそれにいちばん近い、少しよく読まれている頁を選んだ。" : "", stale);
           return f || (stale() ? null : { notice: U.notice("読める頁が見つからなかった", "もう一度めくってみて。", [U.btn("もう一度", () => dg.run(), "btn-dig")]) });
         }
       });

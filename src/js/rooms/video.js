@@ -11,8 +11,8 @@
     { id: "eph", label: "記録映画", note: "教育映画や企業のPR映画。プリンガー・アーカイブより。", q: "collection:prelinger", levels: [5000, 1000, 300, 100] },
     { id: "community", label: "誰かの動画", note: "誰でも動画を預けられる棚。何が出るかわからない。", q: "collection:opensource_movies", levels: [1000, 50, 5, 0] }
   ];
-  const DEPTH_NAMES = ["浅層", "中層", "深層", "最深部"];
-  const levelsOf = (v) => v.levels.map((max, i) => ({ label: DEPTH_NAMES[i], max }));
+  const DEPTH_NAMES = U.DEPTH_NAMES;
+  const levelsOf = (v) => U.depthBands(v.levels);
   const VIDEO_FORMATS = ["h.264", "MPEG4", "512Kb MPEG4", "h.264 IA", "H.264", "Ogg Video", "WebM"];
 
   function pickVideo(files) {
@@ -121,9 +121,8 @@
         dig: async (arg, stale) => {
           const vein = veinOf();
           const base = st.thread ? "mediatype:movies AND " + st.thread.q : vein.q;
-          for (let di = st.depth; di >= -1; di--) {
-            const max = di >= 0 ? vein.levels[di] : null;
-            const q = base + (max != null ? " AND downloads:[0 TO " + max + "]" : "") + " AND NOT title:(iptv OR m3u)";
+          for (const step of U.depthSteps(levelsOf(vein), st.depth, !!st.thread)) {
+            const q = base + U.bandQuery("downloads", step.band) + " AND NOT title:(iptv OR m3u)";
             for (let attempt = 0; attempt < 2; attempt++) {
               const { n, docs } = await U.ia.randomDocs(q, "");
               if (stale()) return null;
@@ -133,7 +132,7 @@
                 const find = await buildFind(doc, vein);
                 if (stale()) return null;
                 if (find) {
-                  if (di !== st.depth) find.extra = U.h("p", { class: "room-note" }, di >= 0 ? DEPTH_NAMES[st.depth] + "には何も埋まっていなかったので、" + DEPTH_NAMES[di] + "から掘り出した。" : "どの深さにも見つからなかったので、深さを問わずに掘り出した。");
+                  if (step.note) find.extra = U.h("p", { class: "room-note" }, step.note);
                   return find;
                 }
               }
