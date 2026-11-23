@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>埋もれ木</title>
+<meta name="description" content="アルゴリズムに頼らず、埋もれた録音・放送・頁・収蔵品を自分の手で掘り出すための道具箱。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%2315120f'/%3E%3Cg fill='none' stroke='%2380bdab'%3E%3Cellipse cx='20' cy='20' rx='15' ry='13.5' stroke-width='2.4'/%3E%3Cellipse cx='19' cy='20.6' rx='10' ry='8.8' stroke-width='1.8'/%3E%3Cellipse cx='18.2' cy='21' rx='5.2' ry='4.6' stroke-width='1.6'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&family=Shippori+Mincho+B1:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="css/style.css">
+<script>
+  (function () {
+    var t = null;
+    try { t = JSON.parse(localStorage.getItem("umoregi.theme") || "null"); } catch (e) {}
+    var m = /[?&]theme=(light|dark)/.exec(location.search);
+    if (m) t = m[1];
+    if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    /* 見比べ用：?seed=数字 をつけると、でたらめの順番が毎回同じになる */
+    var s = /[?&]seed=(\d+)/.exec(location.search);
+    if (s) {
+      var x = Number(s[1]) >>> 0;
+      Math.random = function () {
+        x += 0x6d2b79f5;
+        var r = Math.imul(x ^ (x >>> 15), 1 | x);
+        r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+  })();
+</script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#home">
+    <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+      <g fill="none" stroke="currentColor">
+        <ellipse cx="20" cy="20" rx="17" ry="15.4" stroke-width="2"/>
+        <ellipse cx="19.1" cy="20.5" rx="12.6" ry="11.2" stroke-width="1.4" opacity=".85"/>
+        <ellipse cx="18.4" cy="20.9" rx="8.3" ry="7.3" stroke-width="1.2" opacity=".7"/>
+        <ellipse cx="17.9" cy="21.2" rx="4" ry="3.5" stroke-width="1" opacity=".6"/>
+        <path d="M21 4.7 L22.6 12.4" stroke-width="1" opacity=".55"/>
+      </g>
+      <circle cx="17.6" cy="21.4" r="1.1" fill="currentColor"/>
+    </svg>
+    <span class="brand-text">
+      <span class="brand-name">埋もれ木</span>
+      <span class="brand-sub">発掘のための道具</span>
+    </span>
+  </a>
+  <span class="topbar-spacer"></span>
+  <a class="box-pill" href="#box" id="box-pill">標本箱 <span class="box-count" id="box-count">0</span></a>
+  <button class="theme-btn" id="theme-btn" type="button"></button>
+</header>
+<div class="shell">
+  <nav class="column" id="column" aria-label="発掘場"></nav>
+  <main class="stage-wrap" id="main" tabindex="-1"></main>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="js/data-geo.js"></script>
+<script src="js/data.js"></script>
+<script src="js/core.js"></script>
+<script src="js/rooms/home.js"></script>
+<script src="js/rooms/audio.js"></script>
+<script src="js/rooms/radio.js"></script>
+<script src="js/rooms/covers.js"></script>
+<script src="js/rooms/video.js"></script>
+<script src="js/rooms/storage.js"></script>
+<script src="js/rooms/pages.js"></script>
+<script src="js/rooms/web.js"></script>
+<script src="js/rooms/market.js"></script>
+<script src="js/rooms/cards.js"></script>
+<script src="js/rooms/box.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
