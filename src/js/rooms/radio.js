@@ -214,6 +214,7 @@
           dg.cancel();
           stream.pause();
           stream.removeAttribute("src");
+          if (U.nowPlaying) U.nowPlaying.clear(stream);
           stat.stop();
           status("電源が切れている");
           U.$$(".signal", stage).forEach((s) => s.classList.add("is-idle"));
@@ -278,6 +279,14 @@
           const timer = setTimeout(() => finish(false), 11000);
           stream.addEventListener("playing", onPlay);
           stream.addEventListener("error", onErr);
+          /* 画面の下の「再生中」の帯に出す名前。帯の「止める」は電源を切るのと同じにする */
+          if (U.nowPlaying) U.nowPlaying.tag(stream, {
+            room: "radio",
+            title: (s.name || "").trim() || "名前のない局",
+            sub: [s.countrycode ? U.region(s.countrycode) : s.country, s.state].filter(Boolean).join("／"),
+            art: s.favicon && /^https:/i.test(s.favicon) ? s.favicon : "",
+            stop: () => togglePower(false)
+          });
           stream.src = s.url_resolved;
           stream.play().catch(() => finish(false));
           const check = setInterval(() => { if (stale()) { clearInterval(check); finish(false); } if (done) clearInterval(check); }, 300);

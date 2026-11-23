@@ -238,6 +238,106 @@
     U.emit("media-play", e.target);
   }, true);
 
+  /* ---------- 再生中の帯：どの部屋にいても画面の下に出る ----------
+     部屋の側は U.nowPlaying.tag(要素, {title, sub, room, art, stop}) で名前を書き添えるだけ。
+     名前のついた音や映像が鳴りはじめると帯が出て、止めるか鳴り終わるまで残る。 */
+  const NP_PLAY = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5v13l11-6.5z" fill="currentColor"/></svg>';
+  const NP_PAUSE = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 3.5h4v13h-4zM11.5 3.5h4v13h-4z" fill="currentColor"/></svg>';
+  let npCur = null;
+  const npProg = U.h("span", { class: "np-progress", "aria-hidden": "true" });
+  const npToggle = U.h("button", { type: "button", class: "np-toggle" });
+  const npChip = U.h("span", { class: "lith-chip np-lith", "aria-hidden": "true" });
+  const npRoom = U.h("span", { class: "np-room" });
+  const npTitle = U.h("span", { class: "np-title" });
+  const npSub = U.h("span", { class: "np-sub" });
+  const npGo = U.h("button", { type: "button", class: "np-text", title: "この部屋へ移る" },
+    U.h("span", { class: "np-line1" }, npChip, npRoom, npTitle), npSub);
+  const npStopBtn = U.h("button", { type: "button", class: "np-stop" }, "止める");
+  const npBar = U.h("div", { class: "np", role: "region", "aria-label": "再生中", hidden: true },
+    npProg, U.h("div", { class: "np-inner" }, npToggle, npGo, npStopBtn));
+  document.body.append(npBar);
+
+  const npLive = (m) => !(isFinite(m.duration) && m.duration > 0);
+  function npProgress() {
+    if (!npCur) return;
+    npBar.classList.toggle("is-live", npLive(npCur));
+    npProg.style.width = npLive(npCur) ? "0%" : Math.min(100, (npCur.currentTime / npCur.duration) * 100) + "%";
+  }
+  function npRender() {
+    const m = npCur;
+    npBar.hidden = !m;
+    document.body.classList.toggle("has-np", !!m);
+    if (!m) return;
+    const info = m._np || {};
+    const room = U.rooms.find((r) => r.id === info.room);
+    npChip.setAttribute("data-lith", room ? room.lith : "grid");
+    npRoom.textContent = room ? room.name : "";
+    npTitle.textContent = info.title || "（題名なし）";
+    const state = m.paused ? "一時停止中" : m.readyState < 3 ? "読み込み中…" : npLive(m) ? "受信中" : "";
+    npSub.textContent = [state, info.sub].filter(Boolean).join("　");
+    npToggle.innerHTML = m.paused ? NP_PLAY : NP_PAUSE;
+    npToggle.setAttribute("aria-label", m.paused ? "再生" : "一時停止");
+    npProgress();
+  }
+  /* スマホのロック画面や通知にも、同じ名前と操作を出す */
+  function npSession() {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      if (!npCur) { navigator.mediaSession.metadata = null; return; }
+      const info = npCur._np || {};
+      navigator.mediaSession.metadata = new MediaMetadata({ title: info.title || "", artist: info.sub || "", album: "埋もれ木", artwork: info.art ? [{ src: info.art }] : [] });
+      navigator.mediaSession.setActionHandler("play", () => { if (npCur) npCur.play().catch(() => {}); });
+      navigator.mediaSession.setActionHandler("pause", () => { if (npCur) npCur.pause(); });
+      navigator.mediaSession.setActionHandler("stop", () => npStop());
+    } catch (e) { /* 対応していないブラウザでは何もしない */ }
+  }
+  function npClear(m) {
+    if (m && m !== npCur) return;
+    npCur = null;
+    npRender();
+    npSession();
+  }
+  function npStop() {
+    const m = npCur;
+    if (!m) return;
+    if (m._np && typeof m._np.stop === "function") m._np.stop();
+    else m.pause();
+    npClear(m);
+  }
+  npToggle.addEventListener("click", () => {
+    if (!npCur) return;
+    if (npCur.paused) npCur.play().catch(() => {});
+    else npCur.pause();
+  });
+  npGo.addEventListener("click", () => { const r = npCur && npCur._np && npCur._np.room; if (r && U.go) U.go(r); });
+  npStopBtn.addEventListener("click", npStop);
+
+  /* 聞き耳は要素そのものにつける。次を掘って古い再生器がページから外されると、
+     その知らせは document まで届かないため（外された再生器はブラウザが止める）。 */
+  function npBind(m) {
+    if (m._npBound) return;
+    m._npBound = true;
+    m.addEventListener("play", () => { npCur = m; npRender(); npSession(); });
+    ["pause", "playing", "waiting", "loadedmetadata"].forEach((type) => m.addEventListener(type, () => {
+      if (m !== npCur) return;
+      npRender();
+      /* 電源を切って音源が外された、または再生器ごとページから外されたら、帯も閉じる */
+      if (type === "pause") setTimeout(() => { if (npCur === m && m.paused && (!m.getAttribute("src") || !m.isConnected)) npClear(m); }, 0);
+    }));
+    m.addEventListener("timeupdate", () => { if (m === npCur) npProgress(); });
+    m.addEventListener("ended", () => { setTimeout(() => { if (npCur === m && m.paused) npClear(m); }, 500); });
+    m.addEventListener("error", () => { setTimeout(() => { if (npCur === m && (m.error || m.paused)) npClear(m); }, 1500); });
+  }
+
+  U.nowPlaying = {
+    tag(media, info) {
+      media._np = Object.assign({}, media._np, info);
+      npBind(media);
+      if (media === npCur) { npRender(); npSession(); }
+    },
+    clear: npClear
+  };
+
   /* ---------- 部品：外へのリンク ---------- */
   U.ext = (label, url, cls) => U.h("a", { class: cls || "ext", href: url, target: "_blank", rel: "noopener noreferrer" }, label, U.h("span", { class: "sr-only" }, "（新しいタブで開く）"));
 

@@ -102,6 +102,12 @@
     }
     function load(i, autoplay) {
       idx = i; loaded = true;
+      /* 画面の下の「再生中」の帯に出す名前（曲が複数あれば何曲目かも） */
+      if (U.nowPlaying) U.nowPlaying.tag(audio, {
+        room: "audio", art: image || "",
+        title: (label && label.title) || tracks[i].title,
+        sub: [tracks.length > 1 ? (i + 1) + "/" + tracks.length + " " + tracks[i].title : "", label && label.sub].filter(Boolean).join("／")
+      });
       audio.src = tracks[i].url;
       seek.value = "0";
       mark();

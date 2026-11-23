@@ -608,6 +608,42 @@ img { max-width: 100%; }
 .home-foot { margin-top: 34px; font-size: 12px; color: var(--ink-3); max-width: 52em; }
 .home-foot a { color: inherit; }
 
+/* ---------- 再生中の帯（画面の下に固定） ---------- */
+.np {
+  position: fixed; z-index: 45; left: 0; right: 0; bottom: 0;
+  background: var(--panel); border-top: 1px solid var(--line);
+  padding: 0 max(16px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(16px, env(safe-area-inset-left, 0px));
+  box-shadow: 0 -12px 24px -20px rgb(var(--shadow) / .6);
+}
+.np-progress { position: absolute; left: 0; top: -1px; height: 2px; width: 0; background: var(--accent); transition: width .25s linear; }
+.np.is-live .np-progress { display: none; }
+.np-inner { display: flex; align-items: center; gap: 12px; min-height: 62px; }
+.np-toggle {
+  width: 40px; height: 40px; flex: none; border: 0; border-radius: 50%; cursor: pointer;
+  background: var(--ink); color: var(--bg); display: grid; place-items: center;
+}
+.np-toggle:hover { background: color-mix(in oklab, var(--ink) 85%, var(--accent)); }
+.np-toggle svg { width: 16px; height: 16px; }
+.np-text {
+  appearance: none; border: 0; background: transparent; color: var(--ink); cursor: pointer;
+  flex: 1; min-width: 0; display: grid; gap: 1px; padding: 6px 0; text-align: left;
+}
+.np-line1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.np-lith { width: 22px; height: 10px; }
+.np-room { flex: none; font-size: 12px; color: var(--ink-3); }
+.np-title { min-width: 0; font-weight: 700; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-sub { font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-text:hover .np-title { text-decoration: underline; text-underline-offset: 3px; }
+.np-stop {
+  flex: none; appearance: none; border: 1px solid var(--line); background: transparent; color: var(--ink-2);
+  border-radius: var(--r); padding: 5px 12px; font-size: 13px; cursor: pointer;
+}
+.np-stop:hover { border-color: var(--ink-3); color: var(--ink); }
+/* 帯が出ているあいだは、ページの最後や知らせが帯に隠れないようにする */
+body.has-np .stage-wrap { padding-bottom: 150px; }
+body.has-np .column { padding-bottom: 90px; }
+body.has-np .toasts { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+
 /* ---------- 知らせ ---------- */
 .toasts { position: fixed; z-index: 50; left: 50%; bottom: max(18px, env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); display: grid; gap: 8px; width: min(92vw, 460px); pointer-events: none; }
 .toast {

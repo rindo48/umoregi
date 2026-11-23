@@ -91,6 +91,7 @@
         const year = U.first(md.year) || (U.first(md.date) || "").slice(0, 4);
         const poster = U.ia.image(id, meta.files) || U.ia.base + "/services/img/" + encodeURIComponent(id);
         const video = U.h("video", { class: "video-frame", controls: true, preload: "metadata", playsinline: true, poster, src: U.ia.fileURL(id, vf.name) });
+        if (U.nowPlaying) U.nowPlaying.tag(video, { room: "video", title, sub: [vein.label, year, U.joinList(md.creator)].filter(Boolean).join("／"), art: poster });
         const shelves = U.list(md.collection).filter((c) => !U.ia.BIG.test(c));
         const subjects = U.list(md.subject).flatMap((s) => String(s).split(/;\s*/)).filter(Boolean).slice(0, 5);
         const downloads = Number(doc.downloads || 0);
