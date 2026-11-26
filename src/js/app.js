@@ -79,6 +79,12 @@
     else if (e.key === "k" || e.key === "K") { e.preventDefault(); dg.keep(); }
   });
 
+  /* 「本文へ」：部屋の切り替えは # で行うので、# を書き換えずに本文へ焦点だけ移す */
+  document.getElementById("skip-link").addEventListener("click", (e) => {
+    e.preventDefault();
+    document.getElementById("main").focus();
+  });
+
   /* 明るさ */
   const themeBtn = document.getElementById("theme-btn");
   const darkMQ = window.matchMedia("(prefers-color-scheme: dark)");

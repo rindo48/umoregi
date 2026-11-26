@@ -24,9 +24,10 @@
     { id: "any", label: "どこでもない", note: "国も経度も問わず、世界中からでたらめに。" }
   ];
   const LEVELS = [
-    { label: "浅層", min: 30, max: null, text: "今日31人以上" },
-    { label: "中層", min: 5, max: 30, text: "今日6〜30人" },
-    { label: "深層", min: 0, max: 5, text: "今日1〜5人" },
+    /* ⁠ は数と「人」を離さないための見えないつなぎ */
+    { label: "浅層", min: 30, max: null, text: "今日31⁠人以上" },
+    { label: "中層", min: 5, max: 30, text: "今日6〜30⁠人" },
+    { label: "深層", min: 0, max: 5, text: "今日1〜5⁠人" },
     { label: "最深部", min: null, max: 0, text: "今日まだ誰も" }
   ];
   const playable = (s) => s && s.url_resolved && /^https?:/i.test(s.url_resolved) && !s.hls && !/\.(m3u8?|pls|asx|xspf)(\?|$)/i.test(s.url_resolved)

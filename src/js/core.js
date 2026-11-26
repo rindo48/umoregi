@@ -261,7 +261,7 @@
   function npProgress() {
     if (!npCur) return;
     npBar.classList.toggle("is-live", npLive(npCur));
-    npProg.style.width = npLive(npCur) ? "0%" : Math.min(100, (npCur.currentTime / npCur.duration) * 100) + "%";
+    npProg.style.transform = "scaleX(" + (npLive(npCur) ? 0 : Math.min(1, npCur.currentTime / npCur.duration)) + ")";
   }
   function npRender() {
     const m = npCur;
@@ -371,7 +371,8 @@
   U.depthBands = (maxes) => maxes.map((max, i) => ({ label: U.DEPTH_NAMES[i], max, min: i + 1 < maxes.length ? maxes[i + 1] : null }));
   U.inBand = (n, b) => (b.min == null || n > b.min) && (b.max == null || n <= b.max);
   U.bandText = (b, unit) => {
-    const u = unit || "";
+    /* 数と単位のあいだに見えない「つなぎ」を入れて、狭い画面でも「回」だけが次の行に落ちないようにする */
+    const u = unit ? "⁠" + unit : "";
     if (b.max == null) return b.min == null ? "制限なし" : U.num(b.min + 1) + u + "以上";
     if (b.min == null) return b.max === 0 ? "0" + u : U.num(b.max) + u + "以下";
     if (b.min + 1 === b.max) return U.num(b.max) + u;
